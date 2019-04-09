@@ -184,16 +184,19 @@ public class CameraPlugin implements MethodCallHandler {
           result.success(cameras);
         } catch (CameraAccessException e) {
           result.error("cameraAccess", e.getMessage(), null);
+        } catch (Exception e) {
+          result.error("exception", e.getMessage(), null);
         }
         break;
       case "initialize":
         {
           String cameraName = call.argument("cameraName");
           String resolutionPreset = call.argument("resolutionPreset");
+          boolean enableAudio = call.argument("enableAudio");
           if (camera != null) {
             camera.close();
           }
-          camera = new Camera(cameraName, resolutionPreset, result);
+          camera = new Camera(cameraName, resolutionPreset, result, enableAudio);
           this.activity
               .getApplication()
               .registerActivityLifecycleCallbacks(this.activityLifecycleCallbacks);
@@ -229,6 +232,8 @@ public class CameraPlugin implements MethodCallHandler {
             result.success(null);
           } catch (CameraAccessException e) {
             result.error("CameraAccess", e.getMessage(), null);
+          } catch (Exception e) {
+            result.error("exception", e.getMessage(), null);
           }
           break;
         }
@@ -239,6 +244,8 @@ public class CameraPlugin implements MethodCallHandler {
             result.success(null);
           } catch (CameraAccessException e) {
             result.error("CameraAccess", e.getMessage(), null);
+          } catch (Exception e) {
+            result.error("exception", e.getMessage(), null);
           }
           break;
         }
@@ -298,8 +305,13 @@ public class CameraPlugin implements MethodCallHandler {
     private Size videoSize;
     private MediaRecorder mediaRecorder;
     private boolean recordingVideo;
+    private boolean enableAudio;
 
-    Camera(final String cameraName, final String resolutionPreset, @NonNull final Result result) {
+    Camera(
+        final String cameraName,
+        final String resolutionPreset,
+        @NonNull final Result result,
+        final boolean enableAudio) {
 
       this.cameraName = cameraName;
       textureEntry = view.createSurfaceTexture();
@@ -347,7 +359,7 @@ public class CameraPlugin implements MethodCallHandler {
                       "cameraPermission", "MediaRecorderCamera permission not granted", null);
                   return;
                 }
-                if (!hasAudioPermission()) {
+                if (enableAudio && !hasAudioPermission()) {
                   result.error(
                       "cameraPermission", "MediaRecorderAudio permission not granted", null);
                   return;
@@ -356,7 +368,7 @@ public class CameraPlugin implements MethodCallHandler {
               }
             };
         requestingPermission = false;
-        if (hasCameraPermission() && hasAudioPermission()) {
+        if (hasCameraPermission() && (!enableAudio || hasAudioPermission())) {
           cameraPermissionContinuation.run();
         } else {
           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -364,7 +376,11 @@ public class CameraPlugin implements MethodCallHandler {
             registrar
                 .activity()
                 .requestPermissions(
-                    new String[] {Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO},
+                    enableAudio
+                        ? new String[] {
+                          Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO
+                        }
+                        : new String[] {Manifest.permission.CAMERA},
                     CAMERA_REQUEST_ID);
           }
         }
@@ -372,6 +388,8 @@ public class CameraPlugin implements MethodCallHandler {
         result.error("CameraAccess", e.getMessage(), null);
       } catch (IllegalArgumentException e) {
         result.error("IllegalArgumentException", e.getMessage(), null);
+      } catch (Exception e) {
+        result.error("Exception", e.getMessage(), null);
       }
     }
 
@@ -413,7 +431,9 @@ public class CameraPlugin implements MethodCallHandler {
       Display display = activity.getWindowManager().getDefaultDisplay();
       display.getRealSize(screenResolution);
 
-      final boolean swapWH = getMediaOrientation() % 180 == 90;
+      // Camera sizes and minPreviewSize are both in landscape mode so
+      // screenResolution needs to be as well.
+      final boolean swapWH = screenResolution.x < screenResolution.y;
       int screenWidth = swapWH ? screenResolution.y : screenResolution.x;
       int screenHeight = swapWH ? screenResolution.x : screenResolution.y;
 
@@ -422,7 +442,7 @@ public class CameraPlugin implements MethodCallHandler {
         if (minHeight <= s.getHeight()
             && s.getWidth() <= screenWidth
             && s.getHeight() <= screenHeight
-            && s.getHeight() <= 1080) {
+            && (s.getHeight() <= 1080 || s.getWidth() <= 1080)) {
           goodEnough.add(s);
         }
       }
@@ -467,15 +487,17 @@ public class CameraPlugin implements MethodCallHandler {
         mediaRecorder.release();
       }
       mediaRecorder = new MediaRecorder();
-      mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
       mediaRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
       mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
-      mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
       mediaRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
       mediaRecorder.setVideoEncodingBitRate(1024 * 1000);
-      mediaRecorder.setAudioSamplingRate(16000);
       mediaRecorder.setVideoFrameRate(27);
       mediaRecorder.setVideoSize(videoSize.getWidth(), videoSize.getHeight());
+      if (enableAudio) {
+        mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+        mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+        mediaRecorder.setAudioSamplingRate(16000);
+      }
       mediaRecorder.setOutputFile(outputFilePath);
       mediaRecorder.setOrientationHint(getMediaOrientation());
 
@@ -506,6 +528,11 @@ public class CameraPlugin implements MethodCallHandler {
                     startPreview();
                   } catch (CameraAccessException e) {
                     if (result != null) result.error("CameraAccess", e.getMessage(), null);
+                    cameraDevice.close();
+                    Camera.this.cameraDevice = null;
+                    return;
+                  } catch (Exception e) {
+                    if (result != null) result.error("exception", e.getMessage(), null);
                     cameraDevice.close();
                     Camera.this.cameraDevice = null;
                     return;
@@ -568,6 +595,8 @@ public class CameraPlugin implements MethodCallHandler {
               null);
         } catch (CameraAccessException e) {
           if (result != null) result.error("cameraAccess", e.getMessage(), null);
+        } catch (Exception e) {
+          if (result != null) result.error("exception", e.getMessage(), null);
         }
       }
     }
@@ -637,6 +666,8 @@ public class CameraPlugin implements MethodCallHandler {
             null);
       } catch (CameraAccessException e) {
         result.error("cameraAccess", e.getMessage(), null);
+      } catch (Exception e) {
+        result.error("exception", e.getMessage(), null);
       }
     }
 
@@ -689,10 +720,14 @@ public class CameraPlugin implements MethodCallHandler {
                       captureRequestBuilder.build(), null, null);
                   mediaRecorder.start();
                   result.success(null);
-                } catch (CameraAccessException
-                    | IllegalStateException
-                    | IllegalArgumentException e) {
-                  result.error("cameraException", e.getMessage(), null);
+                } catch (CameraAccessException e) {
+                  result.error("cameraAccess", e.getMessage(), null);
+                } catch (IllegalArgumentException e) {
+                  result.error("illegalArgumentException", e.getMessage(), null);
+                } catch (IllegalStateException e) {
+                  result.error("illegalStateException", e.getMessage(), null);
+                } catch (Exception e) {
+                  result.error("exception", e.getMessage(), null);
                 }
               }
 
@@ -703,6 +738,8 @@ public class CameraPlugin implements MethodCallHandler {
             },
             null);
       } catch (CameraAccessException | IOException e) {
+        result.error("videoRecordingFailed", e.getMessage(), null);
+      } catch (Exception e) {
         result.error("videoRecordingFailed", e.getMessage(), null);
       }
     }
@@ -721,6 +758,8 @@ public class CameraPlugin implements MethodCallHandler {
         result.success(null);
       } catch (CameraAccessException | IllegalStateException e) {
         result.error("videoRecordingFailed", e.getMessage(), null);
+      } catch (Exception e) {
+        result.error("videoRecordingFailed", e.getMessage(), null);
       }
     }
 
@@ -735,6 +774,12 @@ public class CameraPlugin implements MethodCallHandler {
 
       Surface previewSurface = new Surface(surfaceTexture);
       surfaces.add(previewSurface);
+
+      // fix to prevent camera crashes when starting the preview
+      if(surfaces == null || pictureImageReader == null){
+        return;
+      }
+
       captureRequestBuilder.addTarget(previewSurface);
 
       surfaces.add(pictureImageReader.getSurface());
@@ -756,6 +801,12 @@ public class CameraPlugin implements MethodCallHandler {
                 cameraCaptureSession.setRepeatingRequest(captureRequestBuilder.build(), null, null);
               } catch (CameraAccessException | IllegalStateException | IllegalArgumentException e) {
                 sendErrorEvent(e.getMessage());
+              } catch (IllegalArgumentException e) {
+                sendErrorEvent("illegalArgumentException: " + e.getMessage());
+              } catch (IllegalStateException e) {
+                sendErrorEvent("illegalStateException: " + e.getMessage());
+              } catch (Exception e) {
+                sendErrorEvent("exception: " + e.getMessage());
               }
             }
 
@@ -801,6 +852,12 @@ public class CameraPlugin implements MethodCallHandler {
                 cameraCaptureSession.setRepeatingRequest(captureRequestBuilder.build(), null, null);
               } catch (CameraAccessException | IllegalStateException | IllegalArgumentException e) {
                 sendErrorEvent(e.getMessage());
+              } catch (IllegalArgumentException e) {
+                sendErrorEvent("illegalArgumentException: " + e.getMessage());
+              } catch (IllegalStateException e) {
+                sendErrorEvent("illegalStateException: " + e.getMessage());
+              } catch (Exception e) {
+                sendErrorEvent("exception: " + e.getMessage());
               }
             }
 
