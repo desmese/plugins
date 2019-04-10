@@ -799,7 +799,7 @@ public class CameraPlugin implements MethodCallHandler {
                 captureRequestBuilder.set(
                     CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
                 cameraCaptureSession.setRepeatingRequest(captureRequestBuilder.build(), null, null);
-              } catch (CameraAccessException | IllegalStateException | IllegalArgumentException e) {
+              } catch (CameraAccessException e) {
                 sendErrorEvent(e.getMessage());
               } catch (IllegalArgumentException e) {
                 sendErrorEvent("illegalArgumentException: " + e.getMessage());
@@ -850,7 +850,7 @@ public class CameraPlugin implements MethodCallHandler {
                 captureRequestBuilder.set(
                     CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
                 cameraCaptureSession.setRepeatingRequest(captureRequestBuilder.build(), null, null);
-              } catch (CameraAccessException | IllegalStateException | IllegalArgumentException e) {
+              } catch (CameraAccessException e) {
                 sendErrorEvent(e.getMessage());
               } catch (IllegalArgumentException e) {
                 sendErrorEvent("illegalArgumentException: " + e.getMessage());
